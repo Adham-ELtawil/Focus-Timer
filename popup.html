@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Focus Timer</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+
+<body>
+  <div class="app">
+    <!-- Header -->
+    <header class="header">
+      <span class="header__icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"
+          stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="13" r="8"></circle>
+          <path d="M12 9v4l2.5 2.5"></path>
+          <path d="M9 2h6"></path>
+          <path d="M12 2v3"></path>
+        </svg>
+      </span>
+      <h1 class="header__title">Focus Timer</h1>
+    </header>
+
+    <!-- Mode tabs -->
+    <div class="tabs" role="tablist">
+      <button id="tabTimer" class="tab is-active" role="tab" data-mode="timer">Timer</button>
+      <button id="tabStopwatch" class="tab" role="tab" data-mode="stopwatch">Stopwatch</button>
+      <span class="tabs__indicator" aria-hidden="true"></span>
+    </div>
+
+    <!-- ===================== TIMER MODE ===================== -->
+    <div id="timerMode" class="mode">
+
+      <!-- Sub-mode toggle: Standard vs Pomodoro -->
+      <div class="sub-tabs">
+        <button id="subStandard" class="sub-tab is-active" data-sub="standard">⏱ Standard</button>
+        <button id="subPomodoro" class="sub-tab" data-sub="pomodoro">🍅 Pomodoro</button>
+        <span class="sub-tabs__indicator" aria-hidden="true"></span>
+      </div>
+
+      <!-- SETUP VIEW: Standard timer (inputs + presets) -->
+      <section id="setupView" class="setup">
+        <div class="time-input" role="group" aria-label="Set timer duration">
+          <div class="time-input__field">
+            <input id="hoursInput" type="number" inputmode="numeric" min="0" max="99" value="00" aria-label="Hours" />
+            <label>hr</label>
+          </div>
+          <span class="time-input__sep">:</span>
+          <div class="time-input__field">
+            <input id="minutesInput" type="number" inputmode="numeric" min="0" max="59" value="25"
+              aria-label="Minutes" />
+            <label>min</label>
+          </div>
+          <span class="time-input__sep">:</span>
+          <div class="time-input__field">
+            <input id="secondsInput" type="number" inputmode="numeric" min="0" max="59" value="00"
+              aria-label="Seconds" />
+            <label>sec</label>
+          </div>
+        </div>
+
+        <input id="focusMsgInput" class="focus-msg" type="text" maxlength="120"
+          placeholder="What are you focusing on? (optional)" aria-label="Focus message" autocomplete="off" />
+
+        <button id="startBtn" class="btn btn--primary">
+          <span class="btn__plus">▶</span> Start Focus
+        </button>
+
+        <p class="presets__label">Quick Presets</p>
+        <div class="presets">
+          <button class="preset" data-minutes="5">
+            <span class="preset__time">5</span>
+            <span class="preset__unit">min</span>
+          </button>
+          <button class="preset" data-minutes="15">
+            <span class="preset__time">15</span>
+            <span class="preset__unit">min</span>
+          </button>
+          <button class="preset" data-minutes="25">
+            <span class="preset__time">25</span>
+            <span class="preset__unit">min</span>
+          </button>
+        </div>
+
+        <div class="tz-header">
+          <p class="presets__label tz-header__label">World Clock</p>
+          <button id="tzToggle" type="button" class="tz-toggle" aria-label="Hide add field" title="Hide add field">
+            <svg class="tz-toggle__icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+              stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M6 9l6 6 6-6"></path>
+            </svg>
+          </button>
+        </div>
+        <div id="tzInputWrap" class="tz-input">
+          <input id="tzInput" list="tzOptions" placeholder="e.g. Asia/Tokyo" aria-label="Add a time zone"
+            autocomplete="off" />
+          <button id="tzAddBtn" type="button" class="tz-input__add">Add</button>
+        </div>
+        <ul id="tzClocks" class="tz-clocks"></ul>
+      </section>
+
+      <!-- SETUP VIEW: Pomodoro -->
+      <section id="pomoSetup" class="setup pomo-setup hidden">
+        <div class="pomo-phases">
+          <div class="pomo-phase pomo-phase--focus">
+            <span class="pomo-phase__time">25</span>
+            <span class="pomo-phase__unit">min</span>
+            <span class="pomo-phase__label">Focus</span>
+          </div>
+          <div class="pomo-phase pomo-phase--break">
+            <span class="pomo-phase__time">5</span>
+            <span class="pomo-phase__unit">min</span>
+            <span class="pomo-phase__label">Break</span>
+          </div>
+          <div class="pomo-phase pomo-phase--long">
+            <span class="pomo-phase__time">15</span>
+            <span class="pomo-phase__unit">min</span>
+            <span class="pomo-phase__label">Long Break</span>
+          </div>
+        </div>
+        <p class="pomo-info">4 focus cycles until long break</p>
+        <button id="pomoStartBtn" class="btn btn--primary">
+          <span class="btn__plus">▶</span> Start Focus
+        </button>
+      </section>
+
+      <!-- ACTIVE VIEW (countdown) -->
+      <section id="activeView" class="active hidden">
+        <!-- Phase pill (pomodoro only) -->
+        <span id="phasePill" class="phase-pill hidden">FOCUS</span>
+
+        <div class="countdown">
+          <svg class="countdown__ring" viewBox="0 0 220 220">
+            <circle class="countdown__track" cx="110" cy="110" r="100"></circle>
+            <circle id="progressRing" class="countdown__progress" cx="110" cy="110" r="100"></circle>
+          </svg>
+          <div class="countdown__label">
+            <span id="timeDisplay" class="countdown__time">25:00</span>
+            <span id="stateLabel" class="countdown__state">Focusing</span>
+          </div>
+        </div>
+
+        <!-- Cycle dots (pomodoro only) -->
+        <div id="cycleDots" class="cycle-dots hidden"></div>
+
+        <div class="controls">
+          <button id="pauseBtn" class="btn btn--ghost">Pause</button>
+          <button id="skipBtn" class="btn btn--ghost hidden">Skip ⏭</button>
+          <button id="resetBtn" class="btn btn--ghost btn--danger">Reset</button>
+        </div>
+
+        <!-- Next-phase button (pomodoro done state) -->
+        <button id="pomoNextBtn" class="btn btn--primary hidden">
+          <span class="btn__plus">▶</span> Start Break
+        </button>
+      </section>
+    </div>
+
+    <!-- ===================== STOPWATCH MODE ===================== -->
+    <div id="stopwatchMode" class="mode hidden">
+      <section class="stopwatch">
+        <div class="sw-display">
+          <span id="swTime" class="sw-display__time">00:00:00<span class="sw-display__cs">.00</span></span>
+          <span id="swState" class="sw-display__state">Ready</span>
+        </div>
+
+        <div class="sw-controls">
+          <button id="swMainBtn" class="btn btn--primary">
+            <span class="btn__plus">▶</span> Start
+          </button>
+          <button id="swLapBtn" class="btn btn--ghost hidden">Lap</button>
+        </div>
+        <button id="swResetBtn" class="btn btn--ghost btn--danger hidden">Reset</button>
+
+        <ul id="lapList" class="laps"></ul>
+      </section>
+    </div>
+
+    <!-- Developer Credit Footer -->
+    <footer class="app-footer">
+      Made with ♥ by <a href="https://www.linkedin.com/in/adham-eltawil/" target="_blank">Adham Eltawil</a>
+    </footer>
+  </div>
+
+  <datalist id="tzOptions">
+    <option value="UTC"></option>
+    <option value="America/Los_Angeles"></option>
+    <option value="America/Denver"></option>
+    <option value="America/Chicago"></option>
+    <option value="America/New_York"></option>
+    <option value="America/Sao_Paulo"></option>
+    <option value="Europe/London"></option>
+    <option value="Europe/Paris"></option>
+    <option value="Europe/Berlin"></option>
+    <option value="Europe/Istanbul"></option>
+    <option value="Europe/Moscow"></option>
+    <option value="Africa/Cairo"></option>
+    <option value="Asia/Riyadh"></option>
+    <option value="Asia/Dubai"></option>
+    <option value="Asia/Tehran"></option>
+    <option value="Asia/Karachi"></option>
+    <option value="Asia/Kolkata"></option>
+    <option value="Asia/Dhaka"></option>
+    <option value="Asia/Bangkok"></option>
+    <option value="Asia/Shanghai"></option>
+    <option value="Asia/Singapore"></option>
+    <option value="Asia/Tokyo"></option>
+    <option value="Asia/Seoul"></option>
+    <option value="Australia/Sydney"></option>
+    <option value="Pacific/Auckland"></option>
+  </datalist>
+
+  <script src="popup.js"></script>
+</body>
+
+</html>
