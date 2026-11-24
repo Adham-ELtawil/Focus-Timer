@@ -78,7 +78,7 @@ async function maybeBlockTab(tabId, url) {
     BLOCKED_SITES_KEY,
     BLOCK_ENABLED_KEY,
   ]);
-  if ((data[STORAGE_KEY] || {}).status !== "running") return;
+  if (!blocksApply(data[STORAGE_KEY] || {})) return;
   if (data[BLOCK_ENABLED_KEY] === false) return;
 
   const sites = Array.isArray(data[BLOCKED_SITES_KEY]) ? data[BLOCKED_SITES_KEY] : [];
@@ -110,6 +110,31 @@ async function clearBlockRules() {
   } catch (err) {
     console.warn("Focus Timer: clearBlockRules failed", err);
   }
+}
+
+// Blocking is a focus-session behavior. Standard timers count as focus.
+// Pomodoro breaks and long breaks do not. Pausing a focus phase keeps the
+// rules in place; pausing does not call this helper.
+function blocksApply(state) {
+  if (!state || (state.status !== "running" && state.status !== "paused")) return false;
+  if (state.pomodoro && state.pomodoro.phase !== "focus") return false;
+  return true;
+}
+
+async function applyBlockingForState(state) {
+  if (blocksApply(state)) {
+    await setBlockRules(await getBlockedSites());
+  } else {
+    await clearBlockRules();
+  }
+}
+
+function phaseLengthMs(pomo) {
+  const pick = (value, fallback) =>
+    Number.isFinite(value) && value > 0 ? value : fallback;
+  if (pomo && pomo.phase === "break") return pick(pomo.breakMs, POMO_BREAK_MS);
+  if (pomo && pomo.phase === "longBreak") return pick(pomo.longBreakMs, POMO_LONG_BREAK_MS);
+  return pick(pomo && pomo.focusMs, POMO_FOCUS_MS);
 }
 
 // Pomodoro fixed durations (ms)
@@ -209,9 +234,8 @@ async function startTimer(durationMs, label = "", pomodoro = null) {
   await updateBadge(state);
   // Pre-create the offscreen document so sound is ready when the timer ends.
   ensureOffscreen();
-  // Apply site-blocking rules for this session.
-  const sites = await getBlockedSites();
-  await setBlockRules(sites);
+  // Focus phases (and a plain timer) block. Breaks lift the rules.
+  await applyBlockingForState(state);
   return publicState(state);
 }
 
@@ -253,7 +277,8 @@ async function resumeTimer() {
   await updateBadge(next);
   ensureOffscreen();
   // Pick up any blocklist edits made while the timer was paused.
-  await setBlockRules(await getBlockedSites());
+  // A paused break stays unblocked; a paused focus phase blocks again.
+  await applyBlockingForState(next);
   return publicState(next);
 }
 
@@ -268,48 +293,78 @@ async function resetTimer() {
   return publicState(next);
 }
 
+// Holds only while a phase change is being written. Released before the
+// notification so a short next phase can still finish on time.
+let finishing = false;
+
+function carryPomoLengths(from, phase, cycle) {
+  return {
+    phase,
+    cycle,
+    focusMs: from.focusMs,
+    breakMs: from.breakMs,
+    longBreakMs: from.longBreakMs,
+  };
+}
+
 async function finishTimer(isSkip = false) {
-  clearShortTimer();
-
-  const state = await getState();
-  if (state.status !== "running") return publicState(state);
-
-  const next = { ...state, status: "done", endTime: null, remaining: 0 };
-  let doneMessage;
-  let notifTitle = "Focus Timer";
-
-  // ---------- Pomodoro phase transition ----------
-  if (state.pomodoro) {
-    notifTitle = "Pomodoro Timer";
-    const pomo = { ...state.pomodoro };
-
-    if (pomo.phase === "focus") {
-      pomo.nextPhase = pomo.cycle >= POMO_TOTAL_CYCLES ? "longBreak" : "break";
-      doneMessage = isSkip
-        ? `Focus ${pomo.cycle}/${POMO_TOTAL_CYCLES} skipped.`
-        : `Focus ${pomo.cycle}/${POMO_TOTAL_CYCLES} complete! Time for a break.`;
-    } else if (pomo.phase === "break") {
-      pomo.nextPhase = "focus";
-      pomo.cycle = Math.min(pomo.cycle + 1, POMO_TOTAL_CYCLES);
-      doneMessage = isSkip ? "Break skipped!" : "Break over! Ready to focus?";
-    } else {
-      // longBreak
-      pomo.nextPhase = "focus";
-      pomo.cycle = 1;
-      doneMessage = isSkip ? "Long break skipped!" : "Long break over! Fresh start.";
-    }
-    next.pomodoro = pomo;
-  } else {
-    doneMessage = state.label
-      ? `Time's up! "${state.label}" — session complete.`
-      : "Time's up! Your focus session is complete.";
+  if (finishing) {
+    while (finishing) await sleep(15);
+    return publicState(await getState());
   }
+  finishing = true;
 
-  await setState(next);
-  chrome.alarms.clear(ALARM_NAME);
-  chrome.alarms.clear(WATCHDOG_ALARM);
-  await updateBadge(next);
-  await clearBlockRules();
+  let doneMessage = "";
+  let notifTitle = "Focus Timer";
+  let result;
+  try {
+    const state = await getState();
+    if (state.status !== "running") return publicState(state);
+    if (!isSkip && liveRemaining(state) > 250) return publicState(state);
+
+    clearShortTimer();
+    chrome.alarms.clear(ALARM_NAME);
+    chrome.alarms.clear(WATCHDOG_ALARM);
+
+    if (state.pomodoro) {
+      notifTitle = "Pomodoro Timer";
+      const pomo = state.pomodoro;
+      let nextPomo;
+      if (pomo.phase === "focus") {
+        nextPomo = carryPomoLengths(
+          pomo,
+          pomo.cycle >= POMO_TOTAL_CYCLES ? "longBreak" : "break",
+          pomo.cycle,
+        );
+        doneMessage = isSkip
+          ? `Focus ${pomo.cycle}/${POMO_TOTAL_CYCLES} skipped.`
+          : `Focus ${pomo.cycle}/${POMO_TOTAL_CYCLES} complete! Time for a break.`;
+      } else if (pomo.phase === "break") {
+        nextPomo = carryPomoLengths(
+          pomo,
+          "focus",
+          Math.min(pomo.cycle + 1, POMO_TOTAL_CYCLES),
+        );
+        doneMessage = isSkip ? "Break skipped!" : "Break over! Ready to focus?";
+      } else {
+        nextPomo = carryPomoLengths(pomo, "focus", 1);
+        doneMessage = isSkip ? "Long break skipped!" : "Long break over! Fresh start.";
+      }
+      // Start the next phase immediately. startTimer blocks only on focus.
+      result = await startTimer(phaseLengthMs(nextPomo), "", nextPomo);
+    } else {
+      doneMessage = state.label
+        ? `Time's up! "${state.label}" — session complete.`
+        : "Time's up! Your focus session is complete.";
+      const next = { ...state, status: "done", endTime: null, remaining: 0 };
+      await setState(next);
+      await updateBadge(next);
+      await clearBlockRules();
+      result = publicState(next);
+    }
+  } finally {
+    finishing = false;
+  }
 
   try {
     await chrome.notifications.create(`focus-timer-done-${Date.now()}`, {
@@ -329,7 +384,7 @@ async function finishTimer(isSkip = false) {
     console.warn("Focus Timer: chime failed", err);
   }
 
-  return publicState(next);
+  return result;
 }
 
 // ---------- Sound via offscreen document ----------
@@ -457,10 +512,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         sendResponse(await resetTimer());
         break;
       case "UPDATE_BLOCK_RULES": {
-        const s = await getState();
-        if (s.status === "running" || s.status === "paused") {
-          await setBlockRules(await getBlockedSites());
-        }
+        await applyBlockingForState(await getState());
         sendResponse({ ok: true });
         break;
       }
@@ -507,17 +559,13 @@ async function reconcile() {
       await updateBadge(state);
       ensureOffscreen();
       // Re-apply block rules in case the service worker was restarted.
-      await setBlockRules(await getBlockedSites());
+      await applyBlockingForState(state);
     }
   } else {
     await updateBadge(state);
-    if (state.status === "paused") {
-      await setBlockRules(await getBlockedSites());
-    } else {
-      // Defensive: never leave a user blocked once the session is over. Rules
-      // outlive the worker, so a crash mid-session could otherwise strand them.
-      await clearBlockRules();
-    }
+    // Paused focus stays blocked. Anything else (done, idle, a paused break)
+    // must not leave rules behind — they outlive the worker.
+    await applyBlockingForState(state);
   }
 }
 

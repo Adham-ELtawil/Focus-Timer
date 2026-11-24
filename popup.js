@@ -1031,9 +1031,19 @@ els.resetBtn.addEventListener("click", async () => {
 });
 
 // Pomodoro: Start Focus
+function pomoSession(phase, cycle) {
+  return {
+    phase,
+    cycle,
+    focusMs: pomoCustom.focus * 60 * 1000,
+    breakMs: pomoCustom.break * 60 * 1000,
+    longBreakMs: pomoCustom.longBreak * 60 * 1000,
+  };
+}
+
 els.pomoStartBtn.addEventListener("click", async () => {
-  const pomodoro = { phase: "focus", cycle: 1 };
-  render(await send({ type: "START", durationMs: phaseDurationMs("focus"), label: "", pomodoro }));
+  const pomodoro = pomoSession("focus", 1);
+  render(await send({ type: "START", durationMs: pomodoro.focusMs, label: "", pomodoro }));
 });
 
 // Pomodoro: Skip current phase
@@ -1046,10 +1056,22 @@ els.pomoNextBtn.addEventListener("click", async () => {
   if (!cached || !cached.pomodoro) return;
   const pomo = cached.pomodoro;
   const nextPhase = pomo.nextPhase || "focus";
-  const durationMs = phaseDurationMs(nextPhase);
-  const nextPomo = { phase: nextPhase, cycle: pomo.cycle };
-  render(await send({ type: "START", durationMs, label: "", pomodoro: nextPomo }));
+  const nextPomo = pomo.focusMs
+    ? { ...pomo, phase: nextPhase }
+    : pomoSession(nextPhase, pomo.cycle);
+  render(await send({
+    type: "START",
+    durationMs: phaseLengthFrom(nextPomo),
+    label: "",
+    pomodoro: nextPomo,
+  }));
 });
+
+function phaseLengthFrom(pomo) {
+  if (pomo.phase === "break") return pomo.breakMs;
+  if (pomo.phase === "longBreak") return pomo.longBreakMs;
+  return pomo.focusMs;
+}
 
 // Sub-mode tabs
 els.subStandard.addEventListener("click", () => setSubMode("standard"));
