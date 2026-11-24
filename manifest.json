@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Focus Timer",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "A sleek dark-themed focus & countdown timer that keeps running in the background.",
   "author": "Adham Eltawil",
   "permissions": [

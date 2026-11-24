@@ -606,6 +606,11 @@ function stopSwTicker() {
 const LAST_SEEN_VERSION_KEY = "lastSeenVersion";
 
 const CHANGELOG = {
+  "1.2.1": [
+    "Pomodoro starts the next phase automatically",
+    "Sites are blocked during focus, and free during breaks",
+    "The block switch stays off until you choose a site",
+  ],
   "1.2.0": [
     "Block distracting sites while your timer runs",
     "Add any site you want, or tap a built-in one",
