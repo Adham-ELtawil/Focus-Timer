@@ -419,6 +419,14 @@ body::-webkit-scrollbar {
   grid-template-columns: 1fr 1fr 1fr;
 }
 
+.controls.single {
+  grid-template-columns: 1fr;
+}
+
+.controls.single .btn {
+  text-align: center;
+}
+
 .sw-controls {
   display: grid;
   grid-template-columns: 1fr;

@@ -308,14 +308,16 @@ function renderActive(state) {
     els.pauseBtn.classList.add("hidden");
     els.skipBtn.classList.add("hidden");
 
+    // Pause and Skip are hidden, so the remaining button should fill the row.
+    els.controls.classList.add("single");
+    els.controls.classList.remove("three");
+
     if (pomo && pomo.nextPhase) {
       els.stateLabel.textContent = phaseLabel(pomo.phase) + " Done";
       els.pomoNextBtn.classList.remove("hidden");
       const nextLabel = phaseLabel(pomo.nextPhase);
       els.pomoNextBtn.innerHTML = `<span class="btn__plus">\u25b6</span> Start ${nextLabel}`;
       els.resetBtn.textContent = "End";
-      // Update controls grid for 1 button (reset only, next is outside)
-      els.controls.classList.remove("three");
     } else {
       els.stateLabel.textContent = "Done";
       els.pomoNextBtn.classList.add("hidden");
@@ -326,6 +328,7 @@ function renderActive(state) {
     els.pauseBtn.classList.remove("hidden");
     els.pomoNextBtn.classList.add("hidden");
     els.resetBtn.textContent = "Reset";
+    els.controls.classList.remove("single");
 
     // Show skip button only in pomodoro running/paused state
     els.skipBtn.classList.toggle("hidden", !pomo);
