@@ -61,6 +61,82 @@ body::-webkit-scrollbar {
   color: var(--purple-bright);
 }
 
+/* ---------- What's New banner ---------- */
+.whats-new {
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.14), rgba(124, 58, 237, 0.06));
+  border: 1px solid var(--purple);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  animation: fadeInUp 0.4s ease both;
+}
+
+.whats-new__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.whats-new__badge {
+  background: var(--purple);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  padding: 3px 7px;
+  border-radius: 5px;
+}
+
+.whats-new__version {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--purple-bright);
+}
+
+.whats-new__close {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 18px;
+  line-height: 1;
+  padding: 0 2px;
+  cursor: pointer;
+  border-radius: 5px;
+  transition: color 0.15s ease;
+}
+
+.whats-new__close:hover {
+  color: var(--text);
+}
+
+.whats-new__list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.whats-new__list li {
+  position: relative;
+  padding-left: 15px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.whats-new__list li::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 7px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--purple-bright);
+}
+
 /* ---------- Time Input (search-bar style) ---------- */
 .time-input {
   display: flex;
@@ -341,6 +417,22 @@ body::-webkit-scrollbar {
 
 .controls.three {
   grid-template-columns: 1fr 1fr 1fr;
+}
+
+.controls.single {
+  grid-template-columns: 1fr;
+}
+
+.controls.single .btn {
+  text-align: center;
+}
+
+.pause-note {
+  margin: 2px 0 0;
+  text-align: center;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-muted);
 }
 
 .sw-controls {
@@ -897,16 +989,6 @@ body::-webkit-scrollbar {
   background: var(--surface-2);
 }
 
-@media (prefers-reduced-motion: reduce) {
-
-  *,
-  *::before,
-  *::after {
-    animation: none !important;
-    transition: none !important;
-  }
-}
-
 /* ---------- Sub-tabs (Standard / Pomodoro) ---------- */
 .sub-tabs {
   position: relative;
@@ -974,11 +1056,35 @@ body::-webkit-scrollbar {
   border-radius: var(--radius-sm);
 }
 
-.pomo-phase__time {
+.pomo-phase__input {
+  width: 52px;
+  background: transparent;
+  border: none;
+  outline: none;
+  font-family: inherit;
   font-size: 24px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
+  text-align: center;
+  padding: 0;
+  cursor: text;
+  border-radius: 6px;
+  transition: background 0.15s ease;
 }
+
+.pomo-phase__input::-webkit-outer-spin-button,
+.pomo-phase__input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.pomo-phase__input:focus {
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.pomo-phase--focus .pomo-phase__input { color: var(--purple-bright); }
+.pomo-phase--break .pomo-phase__input { color: #4ade80; }
+.pomo-phase--long  .pomo-phase__input { color: #60a5fa; }
 
 .pomo-phase--focus .pomo-phase__time {
   color: var(--purple-bright);
@@ -1097,6 +1203,161 @@ body::-webkit-scrollbar {
   stroke: #60a5fa;
 }
 
+/* ---------- Block List ---------- */
+.block-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 8px;
+}
+
+.block-empty {
+  font-size: 12px;
+  font-weight: 600;
+  text-align: center;
+  color: var(--purple-bright);
+  background: rgba(139, 92, 246, 0.1);
+  border: 1px dashed rgba(139, 92, 246, 0.45);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  margin-bottom: 8px;
+}
+
+.block-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.block-preset {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 11px;
+  background: var(--surface);
+  border: 1px solid var(--border-soft);
+  border-radius: 20px;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+  animation: popIn 0.25s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+.block-preset:hover {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.block-preset.is-added {
+  background: rgba(248, 113, 113, 0.1);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+/* Only user-added chips can be deleted; built-in ones just toggle. */
+.block-preset__remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  margin-right: -3px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1;
+  opacity: 0.5;
+  cursor: pointer;
+  transition: opacity 0.15s ease, background 0.15s ease;
+}
+
+.block-preset__remove:hover {
+  opacity: 1;
+  background: rgba(248, 113, 113, 0.25);
+}
+
+/* ---------- Blocking on/off switch ---------- */
+.block-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.switch {
+  position: relative;
+  width: 34px;
+  height: 19px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: var(--surface-2);
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.switch__knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.2s ease;
+}
+
+.switch[aria-checked="true"] {
+  background: rgba(139, 92, 246, 0.28);
+  border-color: var(--purple);
+}
+
+.switch[aria-checked="true"] .switch__knob {
+  background: var(--purple-bright);
+  transform: translateX(15px);
+}
+
+/* Blocking turned off: keep the list readable but clearly inactive. */
+#blockWrap.is-off {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.block-help {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 6px;
+  margin-bottom: 10px;
+  line-height: 1.5;
+}
+
+.block-help strong {
+  color: var(--text);
+}
+
+/* ---------- Review Nudge ---------- */
+.review-nudge {
+  display: block;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-muted);
+  text-decoration: none;
+  padding: 6px 0;
+  border-radius: var(--radius-sm);
+  transition: color 0.15s ease;
+}
+
+.review-nudge:hover {
+  color: var(--purple-bright);
+}
+
 /* ---------- Developer Credit Footer ---------- */
 .app-footer {
   text-align: center;
@@ -1117,4 +1378,14 @@ body::-webkit-scrollbar {
 .app-footer a:hover {
   color: var(--purple-bright);
   opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
 }

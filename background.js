@@ -12,10 +12,154 @@ const STORAGE_KEY = "timerState";
 const MODE_KEY = "activeMode";
 const LEGACY_POMO_ALARM = "pomodoro-finish";
 const LEGACY_POMO_KEY = "pomodoroState";
+const BLOCKED_SITES_KEY = "blockedSites";
+const BLOCK_ENABLED_KEY = "blockEnabled";
 
 // In-memory fallback timer for short durations where chrome.alarms clamps the
 // delay to ~30 s.  Cleared on pause / reset so it never fires stale.
 let shortTimerTimeout = null;
+
+// ---------- Site Blocking (declarativeNetRequest) ----------
+
+async function getBlockedSites() {
+  try {
+    const data = await chrome.storage.local.get([BLOCKED_SITES_KEY, BLOCK_ENABLED_KEY]);
+    if (data[BLOCK_ENABLED_KEY] === false) return [];
+    return Array.isArray(data[BLOCKED_SITES_KEY]) ? data[BLOCKED_SITES_KEY] : [];
+  } catch {
+    return [];
+  }
+}
+
+async function setBlockRules(sites) {
+  try {
+    const existing = await chrome.declarativeNetRequest.getDynamicRules();
+    const removeIds = existing.map((r) => r.id);
+    if (sites.length === 0) {
+      if (removeIds.length > 0) {
+        await chrome.declarativeNetRequest.updateDynamicRules({ removeRuleIds: removeIds });
+      }
+      return;
+    }
+    // "block" needs no host permission, so it can never be skipped because of
+    // the user's per-extension site-access setting (unlike "redirect").
+    // Aliases share a chip: youtu.be follows youtube.com, twitter.com follows x.com.
+    const addRules = expandSites(sites).map((domain, i) => ({
+      id: i + 1,
+      priority: 1,
+      action: { type: "block" },
+      condition: { urlFilter: `||${domain}^`, resourceTypes: ["main_frame"] },
+    }));
+    await chrome.declarativeNetRequest.updateDynamicRules({ removeRuleIds: removeIds, addRules });
+  } catch (err) {
+    console.warn("Focus Timer: setBlockRules failed", err);
+  }
+}
+
+// Second layer: swap the browser's generic error page for our own blocked page.
+// Uses the tabs API (no host permission needed) so it works regardless of the
+// user's site-access setting.
+function hostOf(url) {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "").toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+async function maybeBlockTab(tabId, url) {
+  if (!url || !/^https?:/i.test(url)) return;
+
+  const host = hostOf(url);
+  if (!host) return;
+
+  // Runs on every navigation, so keep it to a single storage read.
+  const data = await chrome.storage.local.get([
+    STORAGE_KEY,
+    BLOCKED_SITES_KEY,
+    BLOCK_ENABLED_KEY,
+  ]);
+  if (!blocksApply(data[STORAGE_KEY] || {})) return;
+  if (data[BLOCK_ENABLED_KEY] === false) return;
+
+  const sites = expandSites(
+    Array.isArray(data[BLOCKED_SITES_KEY]) ? data[BLOCKED_SITES_KEY] : [],
+  );
+  if (sites.length === 0) return;
+
+  const blocked = sites.some((d) => host === d || host.endsWith(`.${d}`));
+  if (!blocked) return;
+
+  try {
+    const target = chrome.runtime.getURL("blocked.html") + `?site=${encodeURIComponent(host)}`;
+    await chrome.tabs.update(tabId, { url: target });
+  } catch (err) {
+    console.warn("Focus Timer: tab redirect failed", err);
+  }
+}
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  const url = changeInfo.url || (changeInfo.status === "loading" ? tab.url : null);
+  if (url) return maybeBlockTab(tabId, url);
+});
+
+// Short links that never appear as their own chip but must hit blocked.html
+// the same way the primary domain does. Matched in the block rules and in
+// the tab redirect, so a youtu.be hop cannot die on about:blank.
+const DOMAIN_ALIASES = {
+  "youtube.com": ["youtu.be"],
+  "x.com": ["twitter.com"],
+};
+
+function expandSites(sites) {
+  const seen = new Set();
+  const out = [];
+  for (const site of sites) {
+    for (const domain of [site, ...(DOMAIN_ALIASES[site] || [])]) {
+      if (seen.has(domain)) continue;
+      seen.add(domain);
+      out.push(domain);
+    }
+  }
+  return out;
+}
+
+async function clearBlockRules() {
+  try {
+    const existing = await chrome.declarativeNetRequest.getDynamicRules();
+    const removeIds = existing.map((r) => r.id);
+    if (removeIds.length > 0) {
+      await chrome.declarativeNetRequest.updateDynamicRules({ removeRuleIds: removeIds });
+    }
+  } catch (err) {
+    console.warn("Focus Timer: clearBlockRules failed", err);
+  }
+}
+
+// Blocking is a focus-session behavior. Standard timers count as focus.
+// Pomodoro breaks and long breaks do not. Pausing a focus phase keeps the
+// rules in place; pausing does not call this helper.
+function blocksApply(state) {
+  if (!state || (state.status !== "running" && state.status !== "paused")) return false;
+  if (state.pomodoro && state.pomodoro.phase !== "focus") return false;
+  return true;
+}
+
+async function applyBlockingForState(state) {
+  if (blocksApply(state)) {
+    await setBlockRules(await getBlockedSites());
+  } else {
+    await clearBlockRules();
+  }
+}
+
+function phaseLengthMs(pomo) {
+  const pick = (value, fallback) =>
+    Number.isFinite(value) && value > 0 ? value : fallback;
+  if (pomo && pomo.phase === "break") return pick(pomo.breakMs, POMO_BREAK_MS);
+  if (pomo && pomo.phase === "longBreak") return pick(pomo.longBreakMs, POMO_LONG_BREAK_MS);
+  return pick(pomo && pomo.focusMs, POMO_FOCUS_MS);
+}
 
 // Pomodoro fixed durations (ms)
 const POMO_FOCUS_MS = 25 * 60 * 1000;
@@ -81,6 +225,29 @@ async function updateBadge(state) {
   }
 }
 
+// chrome.alarms cannot tick every second, and a suspended worker would
+// otherwise leave the toolbar badge frozen. This interval keeps the countdown
+// live while the worker is awake; the watchdog refreshes it after a restart.
+let badgeTicker = null;
+
+function startBadgeTicker() {
+  if (badgeTicker !== null) return;
+  badgeTicker = setInterval(() => {
+    getState()
+      .then((state) => {
+        if (state.status === "running") return updateBadge(state);
+        stopBadgeTicker();
+      })
+      .catch(() => {});
+  }, 1000);
+}
+
+function stopBadgeTicker() {
+  if (badgeTicker === null) return;
+  clearInterval(badgeTicker);
+  badgeTicker = null;
+}
+
 // ---------- Commands ----------
 
 async function startTimer(durationMs, label = "", pomodoro = null) {
@@ -112,8 +279,11 @@ async function startTimer(durationMs, label = "", pomodoro = null) {
   // Watchdog: periodic safety-net alarm that catches missed finish events.
   chrome.alarms.create(WATCHDOG_ALARM, { periodInMinutes: 0.25 }); // ~15s
   await updateBadge(state);
+  startBadgeTicker();
   // Pre-create the offscreen document so sound is ready when the timer ends.
   ensureOffscreen();
+  // Focus phases (and a plain timer) block. Breaks lift the rules.
+  await applyBlockingForState(state);
   return publicState(state);
 }
 
@@ -126,6 +296,7 @@ async function pauseTimer() {
   await setState(next);
   chrome.alarms.clear(ALARM_NAME);
   chrome.alarms.clear(WATCHDOG_ALARM);
+  stopBadgeTicker();
   await updateBadge(next);
   return publicState(next);
 }
@@ -153,7 +324,11 @@ async function resumeTimer() {
   chrome.alarms.create(ALARM_NAME, { when: next.endTime });
   chrome.alarms.create(WATCHDOG_ALARM, { periodInMinutes: 0.25 });
   await updateBadge(next);
+  startBadgeTicker();
   ensureOffscreen();
+  // Pick up any blocklist edits made while the timer was paused.
+  // A paused break stays unblocked; a paused focus phase blocks again.
+  await applyBlockingForState(next);
   return publicState(next);
 }
 
@@ -163,51 +338,85 @@ async function resetTimer() {
   chrome.alarms.clear(WATCHDOG_ALARM);
   const next = { ...DEFAULT_STATE };
   await setState(next);
+  stopBadgeTicker();
   await updateBadge(next);
+  await clearBlockRules();
   return publicState(next);
 }
 
+// Holds only while a phase change is being written. Released before the
+// notification so a short next phase can still finish on time.
+let finishing = false;
+
+function carryPomoLengths(from, phase, cycle) {
+  return {
+    phase,
+    cycle,
+    focusMs: from.focusMs,
+    breakMs: from.breakMs,
+    longBreakMs: from.longBreakMs,
+  };
+}
+
 async function finishTimer(isSkip = false) {
-  clearShortTimer();
-
-  const state = await getState();
-  if (state.status !== "running") return publicState(state);
-
-  const next = { ...state, status: "done", endTime: null, remaining: 0 };
-  let doneMessage;
-  let notifTitle = "Focus Timer";
-
-  // ---------- Pomodoro phase transition ----------
-  if (state.pomodoro) {
-    notifTitle = "Pomodoro Timer";
-    const pomo = { ...state.pomodoro };
-
-    if (pomo.phase === "focus") {
-      pomo.nextPhase = pomo.cycle >= POMO_TOTAL_CYCLES ? "longBreak" : "break";
-      doneMessage = isSkip
-        ? `Focus ${pomo.cycle}/${POMO_TOTAL_CYCLES} skipped.`
-        : `Focus ${pomo.cycle}/${POMO_TOTAL_CYCLES} complete! Time for a break.`;
-    } else if (pomo.phase === "break") {
-      pomo.nextPhase = "focus";
-      pomo.cycle = Math.min(pomo.cycle + 1, POMO_TOTAL_CYCLES);
-      doneMessage = isSkip ? "Break skipped!" : "Break over! Ready to focus?";
-    } else {
-      // longBreak
-      pomo.nextPhase = "focus";
-      pomo.cycle = 1;
-      doneMessage = isSkip ? "Long break skipped!" : "Long break over! Fresh start.";
-    }
-    next.pomodoro = pomo;
-  } else {
-    doneMessage = state.label
-      ? `Time's up! "${state.label}" — session complete.`
-      : "Time's up! Your focus session is complete.";
+  if (finishing) {
+    while (finishing) await sleep(15);
+    return publicState(await getState());
   }
+  finishing = true;
 
-  await setState(next);
-  chrome.alarms.clear(ALARM_NAME);
-  chrome.alarms.clear(WATCHDOG_ALARM);
-  await updateBadge(next);
+  let doneMessage = "";
+  let notifTitle = "Focus Timer";
+  let result;
+  try {
+    const state = await getState();
+    if (state.status !== "running") return publicState(state);
+    if (!isSkip && liveRemaining(state) > 250) return publicState(state);
+
+    clearShortTimer();
+    chrome.alarms.clear(ALARM_NAME);
+    chrome.alarms.clear(WATCHDOG_ALARM);
+
+    if (state.pomodoro) {
+      notifTitle = "Pomodoro Timer";
+      const pomo = state.pomodoro;
+      let nextPomo;
+      if (pomo.phase === "focus") {
+        nextPomo = carryPomoLengths(
+          pomo,
+          pomo.cycle >= POMO_TOTAL_CYCLES ? "longBreak" : "break",
+          pomo.cycle,
+        );
+        doneMessage = isSkip
+          ? `Focus ${pomo.cycle}/${POMO_TOTAL_CYCLES} skipped.`
+          : `Focus ${pomo.cycle}/${POMO_TOTAL_CYCLES} complete! Time for a break.`;
+      } else if (pomo.phase === "break") {
+        nextPomo = carryPomoLengths(
+          pomo,
+          "focus",
+          Math.min(pomo.cycle + 1, POMO_TOTAL_CYCLES),
+        );
+        doneMessage = isSkip ? "Break skipped!" : "Break over! Ready to focus?";
+      } else {
+        nextPomo = carryPomoLengths(pomo, "focus", 1);
+        doneMessage = isSkip ? "Long break skipped!" : "Long break over! Fresh start.";
+      }
+      // Start the next phase immediately. startTimer blocks only on focus.
+      result = await startTimer(phaseLengthMs(nextPomo), "", nextPomo);
+    } else {
+      doneMessage = state.label
+        ? `Time's up! "${state.label}" — session complete.`
+        : "Time's up! Your focus session is complete.";
+      const next = { ...state, status: "done", endTime: null, remaining: 0 };
+      await setState(next);
+      stopBadgeTicker();
+      await updateBadge(next);
+      await clearBlockRules();
+      result = publicState(next);
+    }
+  } finally {
+    finishing = false;
+  }
 
   try {
     await chrome.notifications.create(`focus-timer-done-${Date.now()}`, {
@@ -227,7 +436,7 @@ async function finishTimer(isSkip = false) {
     console.warn("Focus Timer: chime failed", err);
   }
 
-  return publicState(next);
+  return result;
 }
 
 // ---------- Sound via offscreen document ----------
@@ -315,7 +524,9 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     return getState().then((state) => {
       if (state.status === "running" && liveRemaining(state) <= 0) {
         return finishTimer();
-      } else if (state.status !== "running") {
+      } else if (state.status === "running") {
+        return updateBadge(state);
+      } else {
         // Timer is no longer active; clean up the watchdog.
         chrome.alarms.clear(WATCHDOG_ALARM);
       }
@@ -354,6 +565,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       case "RESET":
         sendResponse(await resetTimer());
         break;
+      case "UPDATE_BLOCK_RULES": {
+        await applyBlockingForState(await getState());
+        sendResponse({ ok: true });
+        break;
+      }
       default:
         sendResponse(publicState(await getState()));
     }
@@ -365,6 +581,15 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 // Reconcile state on worker startup (e.g. after suspension/restart).
 chrome.runtime.onStartup.addListener(reconcile);
 chrome.runtime.onInstalled.addListener(reconcile);
+
+// The popup shows a changelog whenever the stored version trails the running
+// one. Stamping it on a fresh install keeps first-time users from seeing it.
+chrome.runtime.onInstalled.addListener((details) => {
+  if (details.reason !== "install") return;
+  return chrome.storage.local.set({
+    lastSeenVersion: chrome.runtime.getManifest().version,
+  });
+});
 
 async function reconcile() {
   await cleanupLegacyPomodoro();
@@ -386,10 +611,17 @@ async function reconcile() {
       chrome.alarms.create(ALARM_NAME, { when: state.endTime });
       chrome.alarms.create(WATCHDOG_ALARM, { periodInMinutes: 0.25 });
       await updateBadge(state);
+      startBadgeTicker();
       ensureOffscreen();
+      // Re-apply block rules in case the service worker was restarted.
+      await applyBlockingForState(state);
     }
   } else {
+    stopBadgeTicker();
     await updateBadge(state);
+    // Paused focus stays blocked. Anything else (done, idle, a paused break)
+    // must not leave rules behind — they outlive the worker.
+    await applyBlockingForState(state);
   }
 }
 
