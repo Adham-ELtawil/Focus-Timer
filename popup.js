@@ -51,6 +51,24 @@ const els = {
   tzClocks: document.getElementById("tzClocks"),
   tzToggle: document.getElementById("tzToggle"),
   tzInputWrap: document.getElementById("tzInputWrap"),
+  // custom pomodoro inputs
+  pomoFocusInput: document.getElementById("pomoFocusInput"),
+  pomoBreakInput: document.getElementById("pomoBreakInput"),
+  pomoLongInput: document.getElementById("pomoLongInput"),
+  // review nudge
+  reviewNudge: document.getElementById("reviewNudge"),
+  // what's new
+  whatsNew: document.getElementById("whatsNew"),
+  whatsNewVersion: document.getElementById("whatsNewVersion"),
+  whatsNewList: document.getElementById("whatsNewList"),
+  whatsNewClose: document.getElementById("whatsNewClose"),
+  // block list
+  blockToggle: document.getElementById("blockToggle"),
+  blockPower: document.getElementById("blockPower"),
+  blockWrap: document.getElementById("blockWrap"),
+  blockInput: document.getElementById("blockInput"),
+  blockAddBtn: document.getElementById("blockAddBtn"),
+  blockPresets: document.getElementById("blockPresets"),
 };
 
 let cached = null; // last timer state
@@ -75,11 +93,45 @@ const MODE_KEY = "activeMode";
 const LABEL_KEY = "focusLabel";
 const SUB_MODE_KEY = "timerSubMode"; // "standard" | "pomodoro"
 
-// Pomodoro constants (mirror background.js)
-const POMO_FOCUS_MS = 25 * 60 * 1000;
-const POMO_BREAK_MS = 5 * 60 * 1000;
-const POMO_LONG_BREAK_MS = 15 * 60 * 1000;
+// Pomodoro defaults
+const POMO_FOCUS_DEFAULT = 25;
+const POMO_BREAK_DEFAULT = 5;
+const POMO_LONG_DEFAULT = 15;
 const POMO_TOTAL_CYCLES = 4;
+
+// Custom durations (minutes) — loaded from storage on init
+const POMO_CUSTOM_KEY = "pomoCustom";
+let pomoCustom = { focus: POMO_FOCUS_DEFAULT, break: POMO_BREAK_DEFAULT, longBreak: POMO_LONG_DEFAULT };
+
+async function pomoCustomRead() {
+  try {
+    const data = await chrome.storage.local.get(POMO_CUSTOM_KEY);
+    const s = data[POMO_CUSTOM_KEY];
+    if (s && typeof s === "object") {
+      return {
+        focus:     clampPomoMin(s.focus,     1, 99, POMO_FOCUS_DEFAULT),
+        break:     clampPomoMin(s.break,     1, 59, POMO_BREAK_DEFAULT),
+        longBreak: clampPomoMin(s.longBreak, 1, 99, POMO_LONG_DEFAULT),
+      };
+    }
+  } catch { /* ignore */ }
+  return { focus: POMO_FOCUS_DEFAULT, break: POMO_BREAK_DEFAULT, longBreak: POMO_LONG_DEFAULT };
+}
+
+function clampPomoMin(val, min, max, fallback) {
+  const n = parseInt(val, 10);
+  return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : fallback;
+}
+
+function pomoCustomWrite() {
+  chrome.storage.local.set({ [POMO_CUSTOM_KEY]: pomoCustom }).catch(() => { });
+}
+
+function syncPomoInputs() {
+  els.pomoFocusInput.value = pomoCustom.focus;
+  els.pomoBreakInput.value = pomoCustom.break;
+  els.pomoLongInput.value  = pomoCustom.longBreak;
+}
 
 let timerSubMode = "standard"; // current sub-mode
 
@@ -244,6 +296,10 @@ function renderActive(state) {
     els.cycleDots.classList.add("hidden");
   }
 
+  // ---------- Review nudge ----------
+  els.reviewNudge.classList.toggle("hidden", state.status !== "done");
+  els.reviewNudge.href = reviewUrl();
+
   // ---------- Done / running / paused ----------
   if (state.status === "done") {
     els.stateLabel.classList.add("is-done");
@@ -294,6 +350,16 @@ function renderActive(state) {
   }
 }
 
+// The same build ships to both stores, so send each user to their own listing.
+const CHROME_REVIEWS =
+  "https://chromewebstore.google.com/detail/focus-timer/cikdgphmfeoofloohdplihbkpneaicke/reviews";
+const EDGE_REVIEWS =
+  "https://microsoftedge.microsoft.com/addons/detail/igjimgahamegincapeokibhkmfjimodd";
+
+function reviewUrl() {
+  return /\bEdg\//.test(navigator.userAgent) ? EDGE_REVIEWS : CHROME_REVIEWS;
+}
+
 function phaseLabel(phase) {
   if (phase === "focus") return "Focus";
   if (phase === "break") return "Break";
@@ -301,9 +367,9 @@ function phaseLabel(phase) {
 }
 
 function phaseDurationMs(phase) {
-  if (phase === "focus") return POMO_FOCUS_MS;
-  if (phase === "break") return POMO_BREAK_MS;
-  return POMO_LONG_BREAK_MS;
+  if (phase === "focus") return pomoCustom.focus * 60 * 1000;
+  if (phase === "break") return pomoCustom.break * 60 * 1000;
+  return pomoCustom.longBreak * 60 * 1000;
 }
 
 function renderCycleDots(pomo) {
@@ -518,6 +584,217 @@ function stopSwTicker() {
     clearInterval(swTicker);
     swTicker = null;
   }
+}
+
+// ============================================================
+//  WHAT'S NEW
+// ============================================================
+
+const LAST_SEEN_VERSION_KEY = "lastSeenVersion";
+
+const CHANGELOG = {
+  "1.2.0": [
+    "Block distracting sites while your timer runs",
+    "Add any site you want, or tap a built-in one",
+    "Switch blocking off anytime without losing your list",
+  ],
+  "1.1.0": [
+    "Pomodoro durations are now yours to set — tap any number to edit",
+  ],
+};
+
+async function maybeShowWhatsNew() {
+  const version = chrome.runtime.getManifest().version;
+  const notes = CHANGELOG[version];
+  if (!notes) return;
+
+  let lastSeen;
+  try {
+    const data = await chrome.storage.local.get(LAST_SEEN_VERSION_KEY);
+    lastSeen = data[LAST_SEEN_VERSION_KEY];
+  } catch { return; }
+
+  if (lastSeen === version) return;
+
+  els.whatsNewVersion.textContent = `What's new in v${version}`;
+  els.whatsNewList.innerHTML = notes
+    .map((n) => `<li>${n}</li>`)
+    .join("");
+  els.whatsNew.classList.remove("hidden");
+}
+
+function dismissWhatsNew() {
+  els.whatsNew.classList.add("hidden");
+  chrome.storage.local
+    .set({ [LAST_SEEN_VERSION_KEY]: chrome.runtime.getManifest().version })
+    .catch(() => { });
+}
+
+// ============================================================
+//  BLOCK LIST
+// ============================================================
+
+const BLOCK_KEY = "blockedSites";
+const BLOCK_COLLAPSED_KEY = "blockCollapsed";
+const BLOCK_CUSTOM_KEY = "blockCustomSites";
+const BLOCK_ENABLED_KEY = "blockEnabled";
+
+// Chips shipped with the extension. These can be toggled but never deleted.
+const BUILT_IN_SITES = [
+  { domain: "youtube.com", label: "🎬 YouTube" },
+  { domain: "facebook.com", label: "📘 Facebook" },
+  { domain: "x.com", label: "🐦 X" },
+  { domain: "instagram.com", label: "📸 Instagram" },
+  { domain: "tiktok.com", label: "🎵 TikTok" },
+  { domain: "reddit.com", label: "📰 Reddit" },
+  { domain: "netflix.com", label: "🎥 Netflix" },
+  { domain: "twitch.tv", label: "🎮 Twitch" },
+];
+
+let blocks = [];        // domains currently blocked (drives the rules)
+let customSites = [];   // user-added chips, kept even when toggled off
+let blockEnabled = true;
+
+async function blockRead() {
+  try {
+    const data = await chrome.storage.local.get(BLOCK_KEY);
+    return Array.isArray(data[BLOCK_KEY]) ? data[BLOCK_KEY] : [];
+  } catch { return []; }
+}
+
+async function blockCustomRead() {
+  try {
+    const data = await chrome.storage.local.get(BLOCK_CUSTOM_KEY);
+    return Array.isArray(data[BLOCK_CUSTOM_KEY]) ? data[BLOCK_CUSTOM_KEY] : [];
+  } catch { return []; }
+}
+
+async function blockEnabledRead() {
+  try {
+    const data = await chrome.storage.local.get(BLOCK_ENABLED_KEY);
+    return data[BLOCK_ENABLED_KEY] !== false; // default on
+  } catch { return true; }
+}
+
+// Any change to the blocklist must reach a session that is already under way.
+function pushBlockRules() {
+  if (cached && (cached.status === "running" || cached.status === "paused")) {
+    send({ type: "UPDATE_BLOCK_RULES" });
+  }
+}
+
+function blockWrite() {
+  chrome.storage.local.set({ [BLOCK_KEY]: blocks }).catch(() => { });
+  pushBlockRules();
+}
+
+function blockCustomWrite() {
+  chrome.storage.local.set({ [BLOCK_CUSTOM_KEY]: customSites }).catch(() => { });
+}
+
+function setBlockEnabled(enabled, persist = true) {
+  blockEnabled = enabled;
+  els.blockPower.setAttribute("aria-checked", String(enabled));
+  const title = enabled ? "Turn blocking off" : "Turn blocking on";
+  els.blockPower.title = title;
+  els.blockPower.setAttribute("aria-label", title);
+  els.blockWrap.classList.toggle("is-off", !enabled);
+  if (persist) {
+    chrome.storage.local.set({ [BLOCK_ENABLED_KEY]: enabled }).catch(() => { });
+    pushBlockRules();
+  }
+}
+
+async function blockCollapsedRead() {
+  try {
+    const data = await chrome.storage.local.get(BLOCK_COLLAPSED_KEY);
+    return !!data[BLOCK_COLLAPSED_KEY];
+  } catch { return false; }
+}
+
+function setBlockCollapsed(collapsed, persist = true) {
+  els.blockWrap.classList.toggle("hidden", collapsed);
+  els.blockToggle.classList.toggle("is-collapsed", collapsed);
+  const title = collapsed ? "Show block list" : "Hide block list";
+  els.blockToggle.title = title;
+  els.blockToggle.setAttribute("aria-label", title);
+  if (persist) chrome.storage.local.set({ [BLOCK_COLLAPSED_KEY]: collapsed }).catch(() => { });
+}
+
+function normalizeDomain(input) {
+  return input.trim().toLowerCase()
+    .replace(/^https?:\/\//, "")
+    .replace(/\/.*$/, "")
+    .replace(/^www\./, "");
+}
+
+function isValidDomain(domain) {
+  return /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z]{2,})+$/.test(domain);
+}
+
+function escapeHtml(s) {
+  return s.replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+function renderBlockChips() {
+  const chips = [
+    ...BUILT_IN_SITES.map((s) => ({ ...s, custom: false })),
+    ...customSites.map((d) => ({ domain: d, label: d, custom: true })),
+  ];
+
+  els.blockPresets.innerHTML = chips
+    .map(({ domain, label, custom }) => {
+      const on = blocks.includes(domain);
+      const safe = escapeHtml(domain);
+      const remove = custom
+        ? `<span class="block-preset__remove" data-remove="${safe}" title="Remove ${safe}">&times;</span>`
+        : "";
+      return (
+        `<button class="block-preset${on ? " is-added" : ""}" data-domain="${safe}"` +
+        ` title="${on ? "Blocked" : "Not blocked"} — click to toggle">` +
+        `${escapeHtml(label)}${remove}</button>`
+      );
+    })
+    .join("");
+}
+
+function toggleBlock(domain) {
+  const idx = blocks.indexOf(domain);
+  if (idx > -1) blocks.splice(idx, 1);
+  else blocks.push(domain);
+  blockWrite();
+  renderBlockChips();
+}
+
+function removeCustomSite(domain) {
+  customSites = customSites.filter((d) => d !== domain);
+  blocks = blocks.filter((d) => d !== domain);
+  blockCustomWrite();
+  blockWrite();
+  renderBlockChips();
+}
+
+function addBlock(raw) {
+  const domain = normalizeDomain(raw);
+  if (!domain) return;
+  if (!isValidDomain(domain)) {
+    els.blockInput.classList.add("invalid");
+    return;
+  }
+  els.blockInput.classList.remove("invalid");
+
+  const isBuiltIn = BUILT_IN_SITES.some((s) => s.domain === domain);
+  if (!isBuiltIn && !customSites.includes(domain)) {
+    customSites.push(domain);
+    blockCustomWrite();
+  }
+  if (!blocks.includes(domain)) {
+    blocks.push(domain);
+    blockWrite();
+  }
+  renderBlockChips();
+  els.blockInput.value = "";
 }
 
 // ============================================================
@@ -740,7 +1017,7 @@ els.resetBtn.addEventListener("click", async () => {
 // Pomodoro: Start Focus
 els.pomoStartBtn.addEventListener("click", async () => {
   const pomodoro = { phase: "focus", cycle: 1 };
-  render(await send({ type: "START", durationMs: POMO_FOCUS_MS, label: "", pomodoro }));
+  render(await send({ type: "START", durationMs: phaseDurationMs("focus"), label: "", pomodoro }));
 });
 
 // Pomodoro: Skip current phase
@@ -761,6 +1038,17 @@ els.pomoNextBtn.addEventListener("click", async () => {
 // Sub-mode tabs
 els.subStandard.addEventListener("click", () => setSubMode("standard"));
 els.subPomodoro.addEventListener("click", () => setSubMode("pomodoro"));
+
+// Custom Pomodoro durations
+function onPomoInputChange(key, input, min, max, fallback) {
+  let v = clampPomoMin(input.value, min, max, fallback);
+  input.value = v;
+  pomoCustom[key] = v;
+  pomoCustomWrite();
+}
+els.pomoFocusInput.addEventListener("change", () => onPomoInputChange("focus",     els.pomoFocusInput, 1, 99, POMO_FOCUS_DEFAULT));
+els.pomoBreakInput.addEventListener("change", () => onPomoInputChange("break",     els.pomoBreakInput, 1, 59, POMO_BREAK_DEFAULT));
+els.pomoLongInput.addEventListener ("change", () => onPomoInputChange("longBreak", els.pomoLongInput,  1, 99, POMO_LONG_DEFAULT));
 
 function clampPad(input, max) {
   let v = parseInt(input.value, 10) || 0;
@@ -806,6 +1094,37 @@ els.tzToggle.addEventListener("click", () => {
   setTzCollapsed(collapsed);
 });
 
+// Block list events
+els.blockToggle.addEventListener("click", () => {
+  const collapsed = !els.blockToggle.classList.contains("is-collapsed");
+  setBlockCollapsed(collapsed);
+});
+
+els.blockAddBtn.addEventListener("click", () => addBlock(els.blockInput.value));
+
+els.blockInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") addBlock(els.blockInput.value);
+});
+
+els.blockInput.addEventListener("input", () => {
+  els.blockInput.classList.remove("invalid");
+});
+
+els.whatsNewClose.addEventListener("click", dismissWhatsNew);
+
+els.blockPower.addEventListener("click", () => setBlockEnabled(!blockEnabled));
+
+// Chips are re-rendered on every change, so delegate instead of re-binding.
+els.blockPresets.addEventListener("click", (e) => {
+  const remove = e.target.closest(".block-preset__remove");
+  if (remove) {
+    removeCustomSite(remove.dataset.remove);
+    return;
+  }
+  const chip = e.target.closest(".block-preset");
+  if (chip) toggleBlock(chip.dataset.domain);
+});
+
 els.tzAddBtn.addEventListener("click", () => addZone(els.tzInput.value));
 
 els.tzInput.addEventListener("keydown", (e) => {
@@ -833,7 +1152,7 @@ els.tzClocks.addEventListener("click", (e) => {
 // ============================================================
 
 (async () => {
-  const [timerState, swState, mode, savedZones, tzCollapsed, savedLabel, savedSubMode] =
+  const [timerState, swState, mode, savedZones, tzCollapsed, savedLabel, savedSubMode, savedPomoCustom, savedBlocks, blockCollapsed, savedCustomSites, savedBlockEnabled] =
     await Promise.all([
       send({ type: "GET_STATE" }),
       swRead(),
@@ -842,7 +1161,15 @@ els.tzClocks.addEventListener("click", (e) => {
       tzCollapsedRead(),
       labelRead(),
       subModeRead(),
+      pomoCustomRead(),
+      blockRead(),
+      blockCollapsedRead(),
+      blockCustomRead(),
+      blockEnabledRead(),
     ]);
+
+  pomoCustom = savedPomoCustom;
+  syncPomoInputs();
 
   focusLabel = savedLabel;
   if (savedLabel) {
@@ -863,4 +1190,10 @@ els.tzClocks.addEventListener("click", (e) => {
   zones = savedZones;
   renderClocks();
   setTzCollapsed(tzCollapsed, false);
+  blocks = savedBlocks;
+  customSites = savedCustomSites;
+  renderBlockChips();
+  setBlockCollapsed(blockCollapsed, false);
+  setBlockEnabled(savedBlockEnabled, false);
+  maybeShowWhatsNew();
 })();

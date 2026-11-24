@@ -1,0 +1,180 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Focus Mode Active</title>
+  <style>
+    :root {
+      --bg: #15131c;
+      --surface: #1d1a27;
+      --border: #322d44;
+      --text: #ece9f5;
+      --text-muted: #8a829e;
+      --purple: #8b5cf6;
+      --purple-bright: #a78bfa;
+      --purple-deep: #7c3aed;
+      --danger: #f87171;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .card {
+      text-align: center;
+      max-width: 480px;
+      width: 90%;
+      padding: 52px 44px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 24px;
+      box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
+      animation: cardIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+    }
+
+    @keyframes cardIn {
+      from { opacity: 0; transform: scale(0.92) translateY(12px); }
+      to   { opacity: 1; transform: scale(1)    translateY(0); }
+    }
+
+    .icon {
+      font-size: 56px;
+      display: block;
+      margin-bottom: 20px;
+      animation: pulse 2.4s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { transform: scale(1); }
+      50%      { transform: scale(1.1); }
+    }
+
+    h1 {
+      font-size: 26px;
+      font-weight: 700;
+      color: var(--purple-bright);
+      margin-bottom: 10px;
+      letter-spacing: 0.3px;
+    }
+
+    .subtitle {
+      font-size: 14px;
+      color: var(--text-muted);
+      line-height: 1.65;
+      margin-bottom: 22px;
+    }
+
+    .site-chip {
+      display: none;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      max-width: 100%;
+      margin: 0 auto 22px;
+      padding: 9px 18px;
+      background: rgba(248, 113, 113, 0.1);
+      border: 1px solid rgba(248, 113, 113, 0.45);
+      border-radius: 12px;
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--danger);
+      overflow-wrap: anywhere;
+    }
+
+    .site-chip.is-visible { display: flex; }
+
+    .timer-badge {
+      display: none;
+      background: rgba(139, 92, 246, 0.14);
+      border: 1px solid var(--purple);
+      border-radius: 30px;
+      padding: 10px 26px;
+      font-size: 24px;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      color: var(--purple-bright);
+      letter-spacing: 2px;
+      margin-bottom: 28px;
+    }
+
+    .quote {
+      font-size: 13px;
+      color: var(--text-muted);
+      font-style: italic;
+      line-height: 1.7;
+      margin-bottom: 32px;
+      padding: 0 8px;
+    }
+
+    .actions {
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 26px;
+      border-radius: 12px;
+      font-family: inherit;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: border-color 0.18s ease, color 0.18s ease, background 0.18s ease;
+    }
+
+    .btn--primary {
+      border: 1px solid transparent;
+      color: #fff;
+      background: linear-gradient(135deg, var(--purple) 0%, var(--purple-deep) 100%);
+    }
+
+    .btn--primary:hover {
+      background: linear-gradient(135deg, var(--purple-bright) 0%, var(--purple) 100%);
+    }
+
+    .btn--ghost {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+    }
+
+    .btn--ghost:hover {
+      border-color: var(--purple);
+      color: var(--purple-bright);
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <span class="icon">🚫</span>
+    <h1>Focus Mode Active</h1>
+    <p class="subtitle">
+      This site is blocked while your timer is running.<br>
+      Stay on track — you're doing great!
+    </p>
+    <div id="siteChip" class="site-chip"><span>🔒</span><span id="siteName"></span></div>
+    <div id="timerBadge" class="timer-badge"></div>
+    <p id="quote" class="quote"></p>
+    <div class="actions">
+      <button id="closeBtn" class="btn btn--primary">Close Tab</button>
+      <button id="backBtn" class="btn btn--ghost">← Go Back</button>
+    </div>
+  </div>
+
+  <script src="blocked.js"></script>
+</body>
+</html>

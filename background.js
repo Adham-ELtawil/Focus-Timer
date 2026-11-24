@@ -12,10 +12,105 @@ const STORAGE_KEY = "timerState";
 const MODE_KEY = "activeMode";
 const LEGACY_POMO_ALARM = "pomodoro-finish";
 const LEGACY_POMO_KEY = "pomodoroState";
+const BLOCKED_SITES_KEY = "blockedSites";
+const BLOCK_ENABLED_KEY = "blockEnabled";
 
 // In-memory fallback timer for short durations where chrome.alarms clamps the
 // delay to ~30 s.  Cleared on pause / reset so it never fires stale.
 let shortTimerTimeout = null;
+
+// ---------- Site Blocking (declarativeNetRequest) ----------
+
+async function getBlockedSites() {
+  try {
+    const data = await chrome.storage.local.get([BLOCKED_SITES_KEY, BLOCK_ENABLED_KEY]);
+    if (data[BLOCK_ENABLED_KEY] === false) return [];
+    return Array.isArray(data[BLOCKED_SITES_KEY]) ? data[BLOCKED_SITES_KEY] : [];
+  } catch {
+    return [];
+  }
+}
+
+async function setBlockRules(sites) {
+  try {
+    const existing = await chrome.declarativeNetRequest.getDynamicRules();
+    const removeIds = existing.map((r) => r.id);
+    if (sites.length === 0) {
+      if (removeIds.length > 0) {
+        await chrome.declarativeNetRequest.updateDynamicRules({ removeRuleIds: removeIds });
+      }
+      return;
+    }
+    // "block" needs no host permission, so it can never be skipped because of
+    // the user's per-extension site-access setting (unlike "redirect").
+    const addRules = sites.map((domain, i) => ({
+      id: i + 1,
+      priority: 1,
+      action: { type: "block" },
+      condition: { urlFilter: `||${domain}^`, resourceTypes: ["main_frame"] },
+    }));
+    await chrome.declarativeNetRequest.updateDynamicRules({ removeRuleIds: removeIds, addRules });
+  } catch (err) {
+    console.warn("Focus Timer: setBlockRules failed", err);
+  }
+}
+
+// Second layer: swap the browser's generic error page for our own blocked page.
+// Uses the tabs API (no host permission needed) so it works regardless of the
+// user's site-access setting.
+function hostOf(url) {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "").toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+async function maybeBlockTab(tabId, url) {
+  if (!url || !/^https?:/i.test(url)) return;
+
+  const host = hostOf(url);
+  if (!host) return;
+
+  // Runs on every navigation, so keep it to a single storage read.
+  const data = await chrome.storage.local.get([
+    STORAGE_KEY,
+    BLOCKED_SITES_KEY,
+    BLOCK_ENABLED_KEY,
+  ]);
+  if ((data[STORAGE_KEY] || {}).status !== "running") return;
+  if (data[BLOCK_ENABLED_KEY] === false) return;
+
+  const sites = Array.isArray(data[BLOCKED_SITES_KEY]) ? data[BLOCKED_SITES_KEY] : [];
+  if (sites.length === 0) return;
+
+  const blocked = sites.some((d) => host === d || host.endsWith(`.${d}`));
+  if (!blocked) return;
+
+  try {
+    const target = chrome.runtime.getURL("blocked.html") + `?site=${encodeURIComponent(host)}`;
+    await chrome.tabs.update(tabId, { url: target });
+  } catch (err) {
+    console.warn("Focus Timer: tab redirect failed", err);
+  }
+}
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  const url = changeInfo.url || (changeInfo.status === "loading" ? tab.url : null);
+  if (url) return maybeBlockTab(tabId, url);
+});
+
+async function clearBlockRules() {
+  try {
+    const existing = await chrome.declarativeNetRequest.getDynamicRules();
+    const removeIds = existing.map((r) => r.id);
+    if (removeIds.length > 0) {
+      await chrome.declarativeNetRequest.updateDynamicRules({ removeRuleIds: removeIds });
+    }
+  } catch (err) {
+    console.warn("Focus Timer: clearBlockRules failed", err);
+  }
+}
 
 // Pomodoro fixed durations (ms)
 const POMO_FOCUS_MS = 25 * 60 * 1000;
@@ -114,6 +209,9 @@ async function startTimer(durationMs, label = "", pomodoro = null) {
   await updateBadge(state);
   // Pre-create the offscreen document so sound is ready when the timer ends.
   ensureOffscreen();
+  // Apply site-blocking rules for this session.
+  const sites = await getBlockedSites();
+  await setBlockRules(sites);
   return publicState(state);
 }
 
@@ -154,6 +252,8 @@ async function resumeTimer() {
   chrome.alarms.create(WATCHDOG_ALARM, { periodInMinutes: 0.25 });
   await updateBadge(next);
   ensureOffscreen();
+  // Pick up any blocklist edits made while the timer was paused.
+  await setBlockRules(await getBlockedSites());
   return publicState(next);
 }
 
@@ -164,6 +264,7 @@ async function resetTimer() {
   const next = { ...DEFAULT_STATE };
   await setState(next);
   await updateBadge(next);
+  await clearBlockRules();
   return publicState(next);
 }
 
@@ -208,6 +309,7 @@ async function finishTimer(isSkip = false) {
   chrome.alarms.clear(ALARM_NAME);
   chrome.alarms.clear(WATCHDOG_ALARM);
   await updateBadge(next);
+  await clearBlockRules();
 
   try {
     await chrome.notifications.create(`focus-timer-done-${Date.now()}`, {
@@ -354,6 +456,14 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       case "RESET":
         sendResponse(await resetTimer());
         break;
+      case "UPDATE_BLOCK_RULES": {
+        const s = await getState();
+        if (s.status === "running" || s.status === "paused") {
+          await setBlockRules(await getBlockedSites());
+        }
+        sendResponse({ ok: true });
+        break;
+      }
       default:
         sendResponse(publicState(await getState()));
     }
@@ -365,6 +475,15 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 // Reconcile state on worker startup (e.g. after suspension/restart).
 chrome.runtime.onStartup.addListener(reconcile);
 chrome.runtime.onInstalled.addListener(reconcile);
+
+// The popup shows a changelog whenever the stored version trails the running
+// one. Stamping it on a fresh install keeps first-time users from seeing it.
+chrome.runtime.onInstalled.addListener((details) => {
+  if (details.reason !== "install") return;
+  return chrome.storage.local.set({
+    lastSeenVersion: chrome.runtime.getManifest().version,
+  });
+});
 
 async function reconcile() {
   await cleanupLegacyPomodoro();
@@ -387,9 +506,18 @@ async function reconcile() {
       chrome.alarms.create(WATCHDOG_ALARM, { periodInMinutes: 0.25 });
       await updateBadge(state);
       ensureOffscreen();
+      // Re-apply block rules in case the service worker was restarted.
+      await setBlockRules(await getBlockedSites());
     }
   } else {
     await updateBadge(state);
+    if (state.status === "paused") {
+      await setBlockRules(await getBlockedSites());
+    } else {
+      // Defensive: never leave a user blocked once the session is over. Rules
+      // outlive the worker, so a crash mid-session could otherwise strand them.
+      await clearBlockRules();
+    }
   }
 }
 
