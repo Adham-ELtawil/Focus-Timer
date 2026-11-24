@@ -606,7 +606,7 @@ function stopSwTicker() {
 const LAST_SEEN_VERSION_KEY = "lastSeenVersion";
 
 const CHANGELOG = {
-  "1.2.1": [
+  "1.2.2": [
     "Pomodoro starts the next phase automatically",
     "Sites are blocked during focus, and free during breaks",
     "The block switch stays off until you choose a site",
