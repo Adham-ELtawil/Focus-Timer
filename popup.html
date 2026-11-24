@@ -35,24 +35,28 @@
     </section>
 
     <!-- Mode tabs -->
-    <div class="tabs" role="tablist">
-      <button id="tabTimer" class="tab is-active" role="tab" data-mode="timer">Timer</button>
-      <button id="tabStopwatch" class="tab" role="tab" data-mode="stopwatch">Stopwatch</button>
+    <div class="tabs" role="tablist" aria-label="Mode">
+      <button id="tabTimer" class="tab is-active" role="tab" aria-selected="true" aria-controls="timerMode"
+        data-mode="timer">Timer</button>
+      <button id="tabStopwatch" class="tab" role="tab" aria-selected="false" aria-controls="stopwatchMode"
+        tabindex="-1" data-mode="stopwatch">Stopwatch</button>
       <span class="tabs__indicator" aria-hidden="true"></span>
     </div>
 
     <!-- ===================== TIMER MODE ===================== -->
-    <div id="timerMode" class="mode">
+    <div id="timerMode" class="mode" role="tabpanel" aria-labelledby="tabTimer">
 
       <!-- Sub-mode toggle: Standard vs Pomodoro -->
-      <div class="sub-tabs">
-        <button id="subStandard" class="sub-tab is-active" data-sub="standard">⏱ Standard</button>
-        <button id="subPomodoro" class="sub-tab" data-sub="pomodoro">🍅 Pomodoro</button>
+      <div class="sub-tabs" role="tablist" aria-label="Timer type">
+        <button id="subStandard" class="sub-tab is-active" role="tab" aria-selected="true" aria-controls="setupView"
+          data-sub="standard">⏱ Standard</button>
+        <button id="subPomodoro" class="sub-tab" role="tab" aria-selected="false" aria-controls="pomoSetup"
+          tabindex="-1" data-sub="pomodoro">🍅 Pomodoro</button>
         <span class="sub-tabs__indicator" aria-hidden="true"></span>
       </div>
 
       <!-- SETUP VIEW: Standard timer (inputs + presets) -->
-      <section id="setupView" class="setup">
+      <section id="setupView" class="setup" role="tabpanel" aria-labelledby="subStandard">
         <div class="time-input" role="group" aria-label="Set timer duration">
           <div class="time-input__field">
             <input id="hoursInput" type="number" inputmode="numeric" min="0" max="99" value="00" aria-label="Hours" />
@@ -145,7 +149,7 @@
       </section>
 
       <!-- SETUP VIEW: Pomodoro -->
-      <section id="pomoSetup" class="setup pomo-setup hidden">
+      <section id="pomoSetup" class="setup pomo-setup hidden" role="tabpanel" aria-labelledby="subPomodoro">
         <div class="pomo-phases">
           <div class="pomo-phase pomo-phase--focus">
             <input id="pomoFocusInput" class="pomo-phase__input" type="number" inputmode="numeric" min="1" max="99" value="25" aria-label="Focus duration in minutes" />
@@ -193,6 +197,7 @@
           <button id="skipBtn" class="btn btn--ghost hidden">Skip ⏭</button>
           <button id="resetBtn" class="btn btn--ghost btn--danger">Reset</button>
         </div>
+        <p id="pauseBlockNote" class="pause-note hidden">Sites stay blocked while paused</p>
 
         <a id="reviewNudge" class="review-nudge hidden"
           href="https://chromewebstore.google.com/detail/focus-timer/cikdgphmfeoofloohdplihbkpneaicke/reviews"
@@ -206,7 +211,7 @@
     </div>
 
     <!-- ===================== STOPWATCH MODE ===================== -->
-    <div id="stopwatchMode" class="mode hidden">
+    <div id="stopwatchMode" class="mode hidden" role="tabpanel" aria-labelledby="tabStopwatch">
       <section class="stopwatch">
         <div class="sw-display">
           <span id="swTime" class="sw-display__time">00:00:00<span class="sw-display__cs">.00</span></span>

@@ -43,7 +43,8 @@ async function setBlockRules(sites) {
     }
     // "block" needs no host permission, so it can never be skipped because of
     // the user's per-extension site-access setting (unlike "redirect").
-    const addRules = sites.map((domain, i) => ({
+    // Aliases share a chip: youtu.be follows youtube.com, twitter.com follows x.com.
+    const addRules = expandSites(sites).map((domain, i) => ({
       id: i + 1,
       priority: 1,
       action: { type: "block" },
@@ -81,7 +82,9 @@ async function maybeBlockTab(tabId, url) {
   if (!blocksApply(data[STORAGE_KEY] || {})) return;
   if (data[BLOCK_ENABLED_KEY] === false) return;
 
-  const sites = Array.isArray(data[BLOCKED_SITES_KEY]) ? data[BLOCKED_SITES_KEY] : [];
+  const sites = expandSites(
+    Array.isArray(data[BLOCKED_SITES_KEY]) ? data[BLOCKED_SITES_KEY] : [],
+  );
   if (sites.length === 0) return;
 
   const blocked = sites.some((d) => host === d || host.endsWith(`.${d}`));
@@ -99,6 +102,27 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   const url = changeInfo.url || (changeInfo.status === "loading" ? tab.url : null);
   if (url) return maybeBlockTab(tabId, url);
 });
+
+// Short links that never appear as their own chip but must hit blocked.html
+// the same way the primary domain does. Matched in the block rules and in
+// the tab redirect, so a youtu.be hop cannot die on about:blank.
+const DOMAIN_ALIASES = {
+  "youtube.com": ["youtu.be"],
+  "x.com": ["twitter.com"],
+};
+
+function expandSites(sites) {
+  const seen = new Set();
+  const out = [];
+  for (const site of sites) {
+    for (const domain of [site, ...(DOMAIN_ALIASES[site] || [])]) {
+      if (seen.has(domain)) continue;
+      seen.add(domain);
+      out.push(domain);
+    }
+  }
+  return out;
+}
 
 async function clearBlockRules() {
   try {
@@ -201,6 +225,29 @@ async function updateBadge(state) {
   }
 }
 
+// chrome.alarms cannot tick every second, and a suspended worker would
+// otherwise leave the toolbar badge frozen. This interval keeps the countdown
+// live while the worker is awake; the watchdog refreshes it after a restart.
+let badgeTicker = null;
+
+function startBadgeTicker() {
+  if (badgeTicker !== null) return;
+  badgeTicker = setInterval(() => {
+    getState()
+      .then((state) => {
+        if (state.status === "running") return updateBadge(state);
+        stopBadgeTicker();
+      })
+      .catch(() => {});
+  }, 1000);
+}
+
+function stopBadgeTicker() {
+  if (badgeTicker === null) return;
+  clearInterval(badgeTicker);
+  badgeTicker = null;
+}
+
 // ---------- Commands ----------
 
 async function startTimer(durationMs, label = "", pomodoro = null) {
@@ -232,6 +279,7 @@ async function startTimer(durationMs, label = "", pomodoro = null) {
   // Watchdog: periodic safety-net alarm that catches missed finish events.
   chrome.alarms.create(WATCHDOG_ALARM, { periodInMinutes: 0.25 }); // ~15s
   await updateBadge(state);
+  startBadgeTicker();
   // Pre-create the offscreen document so sound is ready when the timer ends.
   ensureOffscreen();
   // Focus phases (and a plain timer) block. Breaks lift the rules.
@@ -248,6 +296,7 @@ async function pauseTimer() {
   await setState(next);
   chrome.alarms.clear(ALARM_NAME);
   chrome.alarms.clear(WATCHDOG_ALARM);
+  stopBadgeTicker();
   await updateBadge(next);
   return publicState(next);
 }
@@ -275,6 +324,7 @@ async function resumeTimer() {
   chrome.alarms.create(ALARM_NAME, { when: next.endTime });
   chrome.alarms.create(WATCHDOG_ALARM, { periodInMinutes: 0.25 });
   await updateBadge(next);
+  startBadgeTicker();
   ensureOffscreen();
   // Pick up any blocklist edits made while the timer was paused.
   // A paused break stays unblocked; a paused focus phase blocks again.
@@ -288,6 +338,7 @@ async function resetTimer() {
   chrome.alarms.clear(WATCHDOG_ALARM);
   const next = { ...DEFAULT_STATE };
   await setState(next);
+  stopBadgeTicker();
   await updateBadge(next);
   await clearBlockRules();
   return publicState(next);
@@ -358,6 +409,7 @@ async function finishTimer(isSkip = false) {
         : "Time's up! Your focus session is complete.";
       const next = { ...state, status: "done", endTime: null, remaining: 0 };
       await setState(next);
+      stopBadgeTicker();
       await updateBadge(next);
       await clearBlockRules();
       result = publicState(next);
@@ -472,7 +524,9 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     return getState().then((state) => {
       if (state.status === "running" && liveRemaining(state) <= 0) {
         return finishTimer();
-      } else if (state.status !== "running") {
+      } else if (state.status === "running") {
+        return updateBadge(state);
+      } else {
         // Timer is no longer active; clean up the watchdog.
         chrome.alarms.clear(WATCHDOG_ALARM);
       }
@@ -557,11 +611,13 @@ async function reconcile() {
       chrome.alarms.create(ALARM_NAME, { when: state.endTime });
       chrome.alarms.create(WATCHDOG_ALARM, { periodInMinutes: 0.25 });
       await updateBadge(state);
+      startBadgeTicker();
       ensureOffscreen();
       // Re-apply block rules in case the service worker was restarted.
       await applyBlockingForState(state);
     }
   } else {
+    stopBadgeTicker();
     await updateBadge(state);
     // Paused focus stays blocked. Anything else (done, idle, a paused break)
     // must not leave rules behind — they outlive the worker.

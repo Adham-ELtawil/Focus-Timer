@@ -33,6 +33,7 @@ const els = {
   skipBtn: document.getElementById("skipBtn"),
   resetBtn: document.getElementById("resetBtn"),
   controls: document.querySelector(".controls"),
+  pauseBlockNote: document.getElementById("pauseBlockNote"),
   phasePill: document.getElementById("phasePill"),
   cycleDots: document.getElementById("cycleDots"),
   pomoNextBtn: document.getElementById("pomoNextBtn"),
@@ -352,6 +353,14 @@ function renderActive(state) {
       els.pauseBtn.textContent = "Pause";
     }
   }
+
+  syncPauseBlockNote(state);
+}
+
+function syncPauseBlockNote(state) {
+  const focusPhase = !state.pomodoro || state.pomodoro.phase === "focus";
+  const show = state.status === "paused" && blockEnabled && blocks.length > 0 && focusPhase;
+  els.pauseBlockNote.classList.toggle("hidden", !show);
 }
 
 // The same build ships to both stores, so send each user to their own listing.
@@ -645,9 +654,9 @@ const BLOCK_ENABLED_KEY = "blockEnabled";
 
 // Chips shipped with the extension. These can be toggled but never deleted.
 const BUILT_IN_SITES = [
-  { domain: "youtube.com", label: "🎬 YouTube" },
+  { domain: "youtube.com", label: "🎬 YouTube", also: ["youtu.be"] },
   { domain: "facebook.com", label: "📘 Facebook" },
-  { domain: "x.com", label: "🐦 X" },
+  { domain: "x.com", label: "🐦 X", also: ["twitter.com"] },
   { domain: "instagram.com", label: "📸 Instagram" },
   { domain: "tiktok.com", label: "🎵 TikTok" },
   { domain: "reddit.com", label: "📰 Reddit" },
@@ -759,15 +768,19 @@ function renderBlockChips() {
   ];
 
   els.blockPresets.innerHTML = chips
-    .map(({ domain, label, custom }) => {
+    .map(({ domain, label, custom, also }) => {
       const on = blocks.includes(domain);
       const safe = escapeHtml(domain);
       const remove = custom
         ? `<span class="block-preset__remove" data-remove="${safe}" title="Remove ${safe}">&times;</span>`
         : "";
+      const covered = [domain, ...(also || [])].join(", ");
+      const title = also && also.length
+        ? `${on ? "Blocked" : "Not blocked"} — click to toggle (${covered})`
+        : `${on ? "Blocked" : "Not blocked"} — click to toggle`;
       return (
         `<button class="block-preset${on ? " is-added" : ""}" data-domain="${safe}"` +
-        ` title="${on ? "Blocked" : "Not blocked"} — click to toggle">` +
+        ` title="${escapeHtml(title)}">` +
         `${escapeHtml(label)}${remove}</button>`
       );
     })
@@ -952,6 +965,10 @@ function setMode(mode, persist = true) {
   if (!MODES.includes(mode)) mode = "timer";
   els.tabTimer.classList.toggle("is-active", mode === "timer");
   els.tabStopwatch.classList.toggle("is-active", mode === "stopwatch");
+  els.tabTimer.setAttribute("aria-selected", mode === "timer" ? "true" : "false");
+  els.tabStopwatch.setAttribute("aria-selected", mode === "stopwatch" ? "true" : "false");
+  els.tabTimer.tabIndex = mode === "timer" ? 0 : -1;
+  els.tabStopwatch.tabIndex = mode === "stopwatch" ? 0 : -1;
 
   const idx = MODES.indexOf(mode);
   els.tabIndicator.style.transform = `translateX(${idx * 100}%)`;
@@ -986,6 +1003,10 @@ function setSubMode(sub, persist = true) {
   timerSubMode = sub;
   els.subStandard.classList.toggle("is-active", sub === "standard");
   els.subPomodoro.classList.toggle("is-active", sub === "pomodoro");
+  els.subStandard.setAttribute("aria-selected", sub === "standard" ? "true" : "false");
+  els.subPomodoro.setAttribute("aria-selected", sub === "pomodoro" ? "true" : "false");
+  els.subStandard.tabIndex = sub === "standard" ? 0 : -1;
+  els.subPomodoro.tabIndex = sub === "pomodoro" ? 0 : -1;
   const idx = SUB_MODES.indexOf(sub);
   els.subIndicator.style.transform = `translateX(${idx * 100}%)`;
 
@@ -1130,6 +1151,22 @@ els.swResetBtn.addEventListener("click", () => {
 els.tabTimer.addEventListener("click", () => setMode("timer"));
 els.tabStopwatch.addEventListener("click", () => setMode("stopwatch"));
 
+function wireTabKeys(tabs) {
+  tabs.forEach((tab, index) => {
+    tab.addEventListener("keydown", (event) => {
+      if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return;
+      event.preventDefault();
+      const delta = event.key === "ArrowRight" ? 1 : -1;
+      const next = tabs[(index + delta + tabs.length) % tabs.length];
+      next.focus();
+      next.click();
+    });
+  });
+}
+
+wireTabKeys([els.tabTimer, els.tabStopwatch]);
+wireTabKeys([els.subStandard, els.subPomodoro]);
+
 els.tzToggle.addEventListener("click", () => {
   const collapsed = !els.tzToggle.classList.contains("is-collapsed");
   setTzCollapsed(collapsed);
@@ -1236,5 +1273,6 @@ els.tzClocks.addEventListener("click", (e) => {
   renderBlockChips();
   setBlockCollapsed(blockCollapsed, false);
   setBlockEnabled(savedBlockEnabled, false);
+  if (cached) syncPauseBlockNote(cached);
   maybeShowWhatsNew();
 })();
