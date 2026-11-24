@@ -981,16 +981,6 @@ body::-webkit-scrollbar {
   background: var(--surface-2);
 }
 
-@media (prefers-reduced-motion: reduce) {
-
-  *,
-  *::before,
-  *::after {
-    animation: none !important;
-    transition: none !important;
-  }
-}
-
 /* ---------- Sub-tabs (Standard / Pomodoro) ---------- */
 .sub-tabs {
   position: relative;
@@ -1380,4 +1370,14 @@ body::-webkit-scrollbar {
 .app-footer a:hover {
   color: var(--purple-bright);
   opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
 }
