@@ -95,22 +95,6 @@
           </button>
         </div>
 
-        <div class="tz-header">
-          <p class="presets__label tz-header__label">World Clock</p>
-          <button id="tzToggle" type="button" class="tz-toggle" aria-label="Hide add field" title="Hide add field">
-            <svg class="tz-toggle__icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
-              stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M6 9l6 6 6-6"></path>
-            </svg>
-          </button>
-        </div>
-        <div id="tzInputWrap" class="tz-input">
-          <input id="tzInput" list="tzOptions" placeholder="e.g. Asia/Tokyo" aria-label="Add a time zone"
-            autocomplete="off" />
-          <button id="tzAddBtn" type="button" class="tz-input__add">Add</button>
-        </div>
-        <ul id="tzClocks" class="tz-clocks"></ul>
-
         <!-- Block List -->
         <div class="tz-header">
           <p class="presets__label tz-header__label">🚫 Block During Focus</p>
@@ -141,6 +125,23 @@
           </div>
           <p class="block-help">Enter the domain only — e.g. <strong>youtube.com</strong>, not the full URL</p>
         </div>
+
+        <div class="tz-header">
+          <p class="presets__label tz-header__label">World Clock</p>
+          <button id="tzToggle" type="button" class="tz-toggle is-collapsed" aria-label="Show add field"
+            title="Show add field">
+            <svg class="tz-toggle__icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+              stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M6 9l6 6 6-6"></path>
+            </svg>
+          </button>
+        </div>
+        <div id="tzInputWrap" class="tz-input hidden">
+          <input id="tzInput" list="tzOptions" placeholder="e.g. Asia/Tokyo" aria-label="Add a time zone"
+            autocomplete="off" />
+          <button id="tzAddBtn" type="button" class="tz-input__add">Add</button>
+        </div>
+        <ul id="tzClocks" class="tz-clocks"></ul>
       </section>
 
       <!-- SETUP VIEW: Pomodoro -->

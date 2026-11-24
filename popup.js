@@ -822,9 +822,12 @@ let tzTicker = null;
 async function tzCollapsedRead() {
   try {
     const data = await chrome.storage.local.get(TZ_COLLAPSED_KEY);
-    return !!data[TZ_COLLAPSED_KEY];
+    // No saved choice means collapsed, so blocking sits above the fold.
+    // A stored true/false is the user's own toggle and is left alone.
+    if (typeof data[TZ_COLLAPSED_KEY] === "boolean") return data[TZ_COLLAPSED_KEY];
+    return true;
   } catch {
-    return false;
+    return true;
   }
 }
 
