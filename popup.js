@@ -66,6 +66,7 @@ const els = {
   blockToggle: document.getElementById("blockToggle"),
   blockPower: document.getElementById("blockPower"),
   blockWrap: document.getElementById("blockWrap"),
+  blockEmpty: document.getElementById("blockEmpty"),
   blockInput: document.getElementById("blockInput"),
   blockAddBtn: document.getElementById("blockAddBtn"),
   blockPresets: document.getElementById("blockPresets"),
@@ -653,7 +654,7 @@ const BUILT_IN_SITES = [
 
 let blocks = [];        // domains currently blocked (drives the rules)
 let customSites = [];   // user-added chips, kept even when toggled off
-let blockEnabled = true;
+let blockEnabled = false;
 
 async function blockRead() {
   try {
@@ -671,9 +672,14 @@ async function blockCustomRead() {
 
 async function blockEnabledRead() {
   try {
-    const data = await chrome.storage.local.get(BLOCK_ENABLED_KEY);
-    return data[BLOCK_ENABLED_KEY] !== false; // default on
-  } catch { return true; }
+    const data = await chrome.storage.local.get([BLOCK_ENABLED_KEY, BLOCK_KEY]);
+    // An explicit choice always wins. With no saved choice, stay off until the
+    // user has actually selected a site. 1.2.0 left the switch on by default
+    // even with an empty list, so a saved list and no saved switch still means on.
+    if (typeof data[BLOCK_ENABLED_KEY] === "boolean") return data[BLOCK_ENABLED_KEY];
+    const sites = Array.isArray(data[BLOCK_KEY]) ? data[BLOCK_KEY] : [];
+    return sites.length > 0;
+  } catch { return false; }
 }
 
 // Any change to the blocklist must reach a session that is already under way.
@@ -699,10 +705,16 @@ function setBlockEnabled(enabled, persist = true) {
   els.blockPower.title = title;
   els.blockPower.setAttribute("aria-label", title);
   els.blockWrap.classList.toggle("is-off", !enabled);
+  syncBlockEmpty();
   if (persist) {
     chrome.storage.local.set({ [BLOCK_ENABLED_KEY]: enabled }).catch(() => { });
     pushBlockRules();
   }
+}
+
+function syncBlockEmpty() {
+  const show = blockEnabled && blocks.length === 0;
+  els.blockEmpty.classList.toggle("hidden", !show);
 }
 
 async function blockCollapsedRead() {
@@ -757,6 +769,7 @@ function renderBlockChips() {
       );
     })
     .join("");
+  syncBlockEmpty();
 }
 
 function toggleBlock(domain) {

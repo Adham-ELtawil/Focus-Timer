@@ -1206,6 +1206,18 @@ body::-webkit-scrollbar {
   margin-bottom: 8px;
 }
 
+.block-empty {
+  font-size: 12px;
+  font-weight: 600;
+  text-align: center;
+  color: var(--purple-bright);
+  background: rgba(139, 92, 246, 0.1);
+  border: 1px dashed rgba(139, 92, 246, 0.45);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  margin-bottom: 8px;
+}
+
 .block-presets {
   display: flex;
   flex-wrap: wrap;

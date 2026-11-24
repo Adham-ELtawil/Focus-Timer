@@ -115,8 +115,8 @@
         <div class="tz-header">
           <p class="presets__label tz-header__label">🚫 Block During Focus</p>
           <div class="block-actions">
-            <button id="blockPower" type="button" class="switch" role="switch" aria-checked="true"
-              aria-label="Turn blocking off" title="Turn blocking off">
+            <button id="blockPower" type="button" class="switch" role="switch" aria-checked="false"
+              aria-label="Turn blocking on" title="Turn blocking on">
               <span class="switch__knob"></span>
             </button>
             <button id="blockToggle" type="button" class="tz-toggle" aria-label="Hide block list"
@@ -129,8 +129,9 @@
           </div>
         </div>
 
-        <div id="blockWrap">
+        <div id="blockWrap" class="is-off">
           <p class="block-hint">Tap to block — tap again to unblock:</p>
+          <p id="blockEmpty" class="block-empty hidden">No sites selected</p>
           <div id="blockPresets" class="block-presets"></div>
 
           <div class="tz-input">
